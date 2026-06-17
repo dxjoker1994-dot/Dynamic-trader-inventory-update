@@ -1,2 +1,1 @@
-# Dynamic-trader-inventory-update
-Dynamic server-side trader tracker for S.T.A.L.K.E.R. that scans faction traders and sends remote stock updates with high-value item information.
+All-Faction Trader Dynamic Remote Tracker is a S.T.A.L.K.E.R. server-side script designed to improve trader awareness by continuously scanning active faction traders and reporting their highest-value inventory items directly through in-game notifications. The system works globally using the game’s simulation registry, allowing players to track trader stock without manually visiting every location.
