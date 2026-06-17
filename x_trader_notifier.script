@@ -1,0 +1,129 @@
+-- All-Faction Trader Dynamic Remote Tracker (Server-Side Edition)
+-- Saved as: gamedata/scripts/x_trader_notifier.script
+
+local config = {
+    min_goodwill = 0,        -- Minimum goodwill required (0 for instant testing)
+    only_affordable = false,  -- If true, filters out items you can't afford
+    duration = 10,           -- Message display time in seconds
+    scan_interval = 60       -- How often to scan in-game (in minutes)
+}
+
+local function rt_format_number(amount)
+    local formatted = tostring(amount) 
+    local k
+    while true do  
+        formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", '%1,%2')
+        if (k == 0) then break end
+    end
+    return formatted
+end
+
+-- SAFELY SCAN AND EVALUATE AN NPC's INVENTORY VIA ENGINE METHODS
+function evaluate_single_trader(npc, community)
+    local best_item_section = nil
+    local max_value = 0
+    local best_item_name = ""
+    local player_money = db.actor and db.actor:money() or 0
+
+    npc:iterate_inventory(function(npc_obj, item)
+        if item then
+            local section = item:section()
+            local price = item:cost() or 0
+            
+            if config.only_affordable and price > player_money then
+                return
+            end
+            
+            if price > max_value then
+                max_value = price
+                best_item_section = section
+                local title_id = ini_sys:r_string_ex(section, "inv_name")
+                best_item_name = title_id and game.translate_string(title_id) or section
+            end
+        end
+    end, npc)
+
+    -- Send HUD notification if a high-value item was caught
+    if best_item_section and max_value > 0 then
+        local trader_name = npc:character_name() or "Unknown Trader"
+        local faction_display = string.upper(string.sub(community, 1, 1)) .. string.sub(community, 2)
+        if community == "stalker" then faction_display = "Loner" end 
+        
+        local header = string.format("REMOTE %s STOCK UPDATE", string.upper(faction_display))
+        local formatted_price = rt_format_number(string.format("%.0f", max_value))
+        
+        local message = string.format(
+            "Trader: %s\\nFaction: %s\\n\\nHIGHEST VALUE ITEM IN STOCK:\\n%s\\n\\nPrice: %s RU", 
+            trader_name,
+            faction_display,
+            best_item_name, 
+            formatted_price
+        )
+        
+        if db.actor then
+            db.actor:give_game_news(header, message, "ui_inGame2_pd_Log_i", 0, config.duration * 1000, 0)
+        end
+    end
+end
+
+-- CORE BACKGROUND SCANNER (SERVER-SIDE GLOBAL)
+function scan_all_traders_dynamically()
+    CreateTimeEvent("dynamic_trader_tracker", "run_global_scan", config.scan_interval * 60, scan_all_traders_dynamically)
+
+    if not db.actor then return true end
+
+    -- Query the Alife Simulator registry to look past the player's visual bubble
+    local sim = alife()
+    if not sim then return true end
+
+    for id = 1, 65534 do
+        local se_obj = sim:object(id)
+        
+        if se_obj and (se_obj:clsid() == clsid.script_stalker or se_obj:clsid() == clsid.stalker) then
+            -- Safely extract the client-side reference if it's on the current map
+            local obj = level.object_by_id(id)
+            
+            if obj and obj:alive() then
+                local community = obj:character_community()
+                
+                if community and community ~= "none" and community ~= "monster" then
+                    local name = obj:character_name() or ""
+                    local profile = obj:profile_name() or ""
+                    
+                    local looks_like_trader = obj:is_trader() or 
+                                              string.find(profile, "trader") or 
+                                              string.find(profile, "barman") or 
+                                              string.find(profile, "supplies") or
+                                              string.find(profile, "petrenko") or
+                                              name == "Sidorovich" or 
+                                              name == "Barkeep" or
+                                              name == "Colonel Petrenko"
+                    
+                    if looks_like_trader then
+                        evaluate_single_trader(obj, community)
+                    end
+                end
+            end
+        end
+    end
+    return true
+end
+
+function on_game_load()
+    if db.actor then
+        db.actor:give_game_news(
+            "SYSTEM DIAGNOSTIC", 
+            "Dynamic Trader Network Online", 
+            "ui_inGame2_pd_Log_i", 
+            0, 
+            5000, 
+            0
+        )
+    end
+    CreateTimeEvent("dynamic_trader_tracker", "run_global_scan", 5, scan_all_traders_dynamically)
+end
+
+function on_game_start()
+    printf("!!! DYNAMIC TRADER TRACKER: Active !!!")
+    RegisterScriptCallback("on_game_load", on_game_load)
+end
